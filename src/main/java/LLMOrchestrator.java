@@ -2,24 +2,53 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
+import java.time.Duration; // <-- Must be at the top with the other imports
 
 public class LLMOrchestrator {
     
     public static void main(String[] args) {
-        // 1. Initialize LangChain4j ChatModel (Module 4 Runtime)
+        // 1. Initialize LangChain4j ChatModel with Timeout
         ChatLanguageModel model = OpenAiChatModel.builder()
             .baseUrl("http://127.0.0.1:8080/v1")
-            .apiKey("not-needed") // Local offline models bypass authentication
+            .apiKey("not-needed")
             .modelName("g9v3")
-            .temperature(0.0) // Force deterministic JSON output
+            .temperature(0.0)
+            .timeout(Duration.ofMinutes(5)) // <-- Extended timeout for local hardware
             .build();
 
-        // 2. Define the JSON schema prompt (Module 2 Summarization)
-        String systemPrompt = "You are a research summarizer. Return ONLY a valid JSON object with the exact keys: 'problem', 'methodology', 'takeaway', and 'topic'. Do not include markdown formatting.";
+        // 2. Define the hardened JSON schema prompt
+        String systemPrompt = """
+            You are an academic research summarizer. Read the provided text and return ONLY a valid JSON object.
+            
+            Rules for Summarization:
+            1. 'problem': Summarize the core issue the paper addresses in 1-2 concise sentences.
+            2. 'methodology': Summarize the authors' proposed solution or architecture in 1-2 sentences.
+            3. 'takeaway': Summarize the main result or conclusion in 1 sentence.
+            4. 'topic': Categorize the paper using ONLY ONE of the 'Available topics' provided in the user message.
+            
+            Rules for Corrupted Text:
+            If the provided text is a string of random characters, mathematical symbols, or completely unreadable due to PDF extraction errors, DO NOT invent a summary. 
+            Instead, you MUST output exactly this:
+            {
+              "problem": "Extraction failed due to corrupted text.",
+              "methodology": "N/A",
+              "takeaway": "N/A",
+              "topic": "Uncategorized"
+            }
+            
+            Do not output markdown formatting or <think> tags.
+            """;
         
-        // 3. Inject active topics to prevent duplicate category tags (Module 3 Classification)
-        String activeTopics = "[Machine Learning, Systems, Distributed Computing]";
-        String pdfText = "This paper introduces a local inference system for research papers."; 
+        // 3. Extract text from your real PDF file
+        String filePath = "C:\\Users\\teja\\OneDrive\\Desktop\\PWI\\handson1.pdf"; 
+        String rawPdfText = PDFExtractor.extractFirstPage(filePath);
+        
+        // Truncate to protect the 4,096 token context window
+        String pdfText = rawPdfText.length() > 12000 
+            ? rawPdfText.substring(0, 12000) 
+            : rawPdfText;
+
+        String activeTopics = "[Machine Learning, Systems, Distributed Computing, Artificial Intelligence]";
         String userPrompt = String.format("Available topics: %s.\n\nPaper text:\n%s", activeTopics, pdfText);
 
         System.out.println("Calling local llama.cpp server via LangChain4j...");
@@ -39,6 +68,8 @@ public class LLMOrchestrator {
         
         System.out.println("\nClean JSON ready for Jackson/Gson Parsing:");
         System.out.println(cleanJson);
+        
+        // Cleanly terminate the background network threads
         System.exit(0);
     }
 }
