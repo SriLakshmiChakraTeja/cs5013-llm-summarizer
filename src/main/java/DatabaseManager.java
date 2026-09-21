@@ -40,11 +40,22 @@ public class DatabaseManager {
             );
             """;
 
+        // Required 4th table as per design doc
+        String sqlCreateCache = """
+            CREATE TABLE IF NOT EXISTS processing_cache (
+                file_hash TEXT PRIMARY KEY,
+                paper_id INTEGER,
+                processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (paper_id) REFERENCES papers (id)
+            );
+            """;
+
         try (Connection conn = DriverManager.getConnection(DB_URL);
              Statement stmt = conn.createStatement()) {
             stmt.execute(sqlCreatePapers);
             stmt.execute(sqlCreateSummaries);
             stmt.execute(sqlCreateTopics);
+            stmt.execute(sqlCreateCache);
         } catch (SQLException e) {
             System.err.println("Database initialization error: " + e.getMessage());
         }
@@ -69,8 +80,9 @@ public class DatabaseManager {
         }
     }
 
-    public boolean isPaperProcessed(String fileHash) {
-        String query = "SELECT id FROM papers WHERE file_hash = ?";
+    // Exact method to check processing_cache table
+    public boolean isCached(String fileHash) {
+        String query = "SELECT file_hash FROM processing_cache WHERE file_hash = ?";
         try (Connection conn = DriverManager.getConnection(DB_URL);
              PreparedStatement pstmt = conn.prepareStatement(query)) {
             pstmt.setString(1, fileHash);
@@ -86,6 +98,7 @@ public class DatabaseManager {
         String insertPaper = "INSERT INTO papers(file_path, file_hash) VALUES(?, ?)";
         String insertSummary = "INSERT INTO summaries(paper_id, problem, methodology, takeaway, topic) VALUES(?, ?, ?, ?, ?)";
         String insertTopic = "INSERT OR IGNORE INTO topics(name) VALUES(?)";
+        String insertCache = "INSERT OR IGNORE INTO processing_cache(file_hash, paper_id) VALUES(?, ?)";
 
         try (Connection conn = DriverManager.getConnection(DB_URL)) {
             conn.setAutoCommit(false);
@@ -115,8 +128,14 @@ public class DatabaseManager {
                 pstmt.executeUpdate();
             }
 
+            try (PreparedStatement pstmt = conn.prepareStatement(insertCache)) {
+                pstmt.setString(1, fileHash);
+                pstmt.setInt(2, paperId);
+                pstmt.executeUpdate();
+            }
+
             conn.commit();
-            System.out.println("Saved summary to SQLite cache: " + filePath);
+            System.out.println("Saved summary to SQLite and updated processing_cache: " + filePath);
         } catch (SQLException e) {
             System.err.println("Failed to persist summary: " + e.getMessage());
         }
