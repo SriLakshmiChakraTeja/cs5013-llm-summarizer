@@ -22,10 +22,10 @@ public class PDFExtractor {
             // This strips out corrupted equations, integrals, and matrices, leaving the plain English words.
             String cleanText = rawText.replaceAll("[^a-zA-Z0-9\\s\\.,!\\?:;\\-\\(\\)\\[\\]\"']", " ");
             
-            // Collapse massive gaps left by deleted math equations into single spaces
+            // // Collapse massive gaps left by deleted math equations into single spaces
             cleanText = cleanText.replaceAll("\\s+", " ").trim();
-
             return cleanText;
+            // return rawText;
 
         } catch (Exception e) {
             System.err.println("Failed to read PDF: " + e.getMessage());

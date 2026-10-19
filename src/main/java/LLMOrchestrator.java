@@ -6,22 +6,44 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
 import java.io.File;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 
 public class LLMOrchestrator {
+    private static final String MODEL_NAME = "g9v3";
     
-    public static void main(String[] args) {
-        // 1. BULLETPROOF LOGGER SUPPRESSION
-        // Disable Apache Commons Logging (used by PDFBox)
+    public static boolean verifyLLMConnection(String inputUrl) {
+        try {
+            String modelUrl = normalizeModelUrl(inputUrl);
+            System.out.println("Checking LLM server at '" + modelUrl + "'...");
+            
+            ChatLanguageModel testModel = OpenAiChatModel.builder()
+                .baseUrl(modelUrl)
+                .apiKey("not-needed")
+                .modelName(MODEL_NAME)
+                .temperature(0.0)
+                .timeout(Duration.ofSeconds(5)) 
+                .build();
+
+            String response = testModel.generate("Reply with exactly: OK");
+            boolean success = response != null && !response.isBlank();
+            if (success) System.out.println("LLM server is reachable.");
+            return success;
+        } catch (Exception e) {
+            System.err.println("Verification failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public static List<FileOrganizer.MoveTask> processLibrary(String verifiedModelUrl, String targetFolder) {
         System.setProperty("org.apache.commons.logging.Log", "org.apache.commons.logging.impl.NoOpLog");
-        // Disable Java Util Logging (JUL) entirely for this CLI run to silence font warnings
         java.util.logging.LogManager.getLogManager().reset();
 
         ChatLanguageModel model = OpenAiChatModel.builder()
-            .baseUrl("http://127.0.0.1:8080/v1")
+            .baseUrl(verifiedModelUrl)
             .apiKey("not-needed")
-            .modelName("g9v3")
+            .modelName(MODEL_NAME)
             .temperature(0.0)
             .timeout(Duration.ofMinutes(5)) 
             .build();
@@ -52,17 +74,15 @@ public class LLMOrchestrator {
             Do not output markdown formatting or <think> tags.
             """;
 
-        String targetFolder = "C:\\Users\\teja\\OneDrive\\Desktop\\MyResearchLibrary";
         List<File> pdfs = PDFExtractor.getPdfsInDirectory(targetFolder);
+        List<FileOrganizer.MoveTask> pendingMoves = new ArrayList<>();
         
         if (pdfs.isEmpty()) {
             System.out.println("No PDFs found in " + targetFolder);
-            System.exit(0);
+            return pendingMoves; 
         }
 
         System.out.println("Found " + pdfs.size() + " PDF(s). Starting processing loop...\n");
-
-        List<FileOrganizer.MoveTask> pendingMoves = new ArrayList<>();
 
         for (File pdf : pdfs) {
             System.out.println("--------------------------------------------------");
@@ -93,7 +113,6 @@ public class LLMOrchestrator {
                     UserMessage.from(userPrompt)
                 ).content().text();
 
-                // STRICT BOUNDARY EXTRACTOR: Slice out only the JSON object
                 String cleanJson = rawResponse;
                 int jsonStart = cleanJson.indexOf('{');
                 int jsonEnd = cleanJson.lastIndexOf('}');
@@ -101,7 +120,6 @@ public class LLMOrchestrator {
                 if (jsonStart != -1 && jsonEnd != -1 && jsonStart < jsonEnd) {
                     cleanJson = cleanJson.substring(jsonStart, jsonEnd + 1);
                 } else {
-                    // LLM completely failed to generate JSON. Trigger the escape hatch manually.
                     cleanJson = "{\"problem\": \"Extraction failed: LLM output format error.\", \"methodology\": \"N/A\", \"takeaway\": \"N/A\", \"topic\": \"Uncategorized\"}";
                 }
                 
@@ -118,9 +136,59 @@ public class LLMOrchestrator {
         System.out.println("--------------------------------------------------");
         System.out.println("All files processed.");
         
-        List<String> finalTopics = dbManager.getAllTopics();
-        FileOrganizer.reviewAndMoveBulk(pendingMoves, targetFolder, finalTopics, dbManager);
-        
-        System.exit(0);
+        return pendingMoves;
+    }
+
+    private static String normalizeModelUrl(String input) {
+        String modelUrl = input.trim();
+        if (modelUrl.isEmpty()) throw new IllegalArgumentException("LLM model URL cannot be empty.");
+        if (!modelUrl.contains("://")) modelUrl = "http://" + modelUrl;
+
+        URI parsedModelUrl;
+        try {
+            parsedModelUrl = URI.create(modelUrl);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid LLM model URL: " + modelUrl, e);
+        }
+
+        String scheme = parsedModelUrl.getScheme();
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+            throw new IllegalArgumentException("LLM model URL must use HTTP or HTTPS.");
+        }
+        if (parsedModelUrl.getHost() == null) {
+            throw new IllegalArgumentException("LLM model URL must include a valid host.");
+        }
+
+        if (!isLocalHost(parsedModelUrl.getHost())) {
+            throw new IllegalArgumentException(
+                "LLM model URL must point to a local server (localhost, 127.x.x.x, or ::1)."
+            );
+        }
+
+        return modelUrl.replaceAll("/+$", "");
+    }
+
+    private static boolean isLocalHost(String host) {
+        String normalizedHost = host.toLowerCase();
+        if ("localhost".equals(normalizedHost) || "::1".equals(normalizedHost)
+                || "[::1]".equals(normalizedHost)) {
+            return true;
+        }
+
+        String[] octets = normalizedHost.split("\\.", -1);
+        if (octets.length != 4 || !"127".equals(octets[0])) {
+            return false;
+        }
+        for (String octet : octets) {
+            try {
+                int value = Integer.parseInt(octet);
+                if (value < 0 || value > 255 || !Integer.toString(value).equals(octet)) {
+                    return false;
+                }
+            } catch (NumberFormatException e) {
+                return false;
+            }
+        }
+        return true;
     }
 }
