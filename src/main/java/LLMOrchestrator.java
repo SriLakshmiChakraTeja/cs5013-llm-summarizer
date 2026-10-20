@@ -53,16 +53,16 @@ public class LLMOrchestrator {
         ObjectMapper mapper = new ObjectMapper();
 
         String systemPrompt = """
-            You are an academic document summarizer. Read the provided text and return ONLY a valid JSON object.
+            You are an expert academic research summarizer. Read the provided text and return ONLY a valid JSON object.
             
             Rules for Summarization:
-            1. 'problem': Identify the overall subject of the document. If it is a research paper, summarize the core problem. If it is a tutorial, slide deck, or textbook chapter, summarize the overarching topics covered (e.g., 'A tutorial covering linear transformations and vector spaces'). Do NOT just copy the first question.
-            2. 'methodology': Summarize the format or approach (e.g., 'Problem set with solutions', 'Theoretical proofs and definitions', 'Software documentation') in 1-2 sentences.
-            3. 'takeaway': Summarize the main learning outcome or conclusion in 1 sentence.
-            4. 'topic': Categorize the paper using ONLY ONE of the 'Available topics' provided in the user message.
+            1. 'problem': Write a paragraph (1 sentence) explaining the background, the context of the field, and the exact core issue or gap the paper addresses.
+            2. 'methodology': Write a detailed paragraph (4-6 sentences) thoroughly explaining the authors' proposed solution, system architecture, mathematical models, or experimental setup.
+            3. 'takeaway': Write a paragraph (1 sentence) expanding on the main results, specific performance improvements, conclusions, and future implications.
+            4. 'topic': You MUST strictly evaluate the 'Available topics' provided in the user message. Prioritize matching the paper to an existing topic at all costs. ONLY invent a new 1-3 word topic if the paper's subject matter is completely alien to EVERY available option.
             
             Rules for Corrupted Text:
-            If the provided text contains NO readable English words, DO NOT invent a summary. 
+            If the provided text is a string of random characters, mathematical symbols, or completely unreadable due to PDF extraction errors, DO NOT invent a summary. 
             Instead, you MUST output exactly this:
             {
               "problem": "Extraction failed due to corrupted text.",
@@ -71,7 +71,7 @@ public class LLMOrchestrator {
               "topic": "Uncategorized"
             }
             
-            Do not output markdown formatting or <think> tags.
+            Ensure all output is properly escaped for valid JSON. Do not output markdown formatting or <think> tags.
             """;
 
         List<File> pdfs = PDFExtractor.getPdfsInDirectory(targetFolder);
