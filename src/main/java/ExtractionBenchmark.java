@@ -6,7 +6,7 @@ public class ExtractionBenchmark {
        String sampleFolder = "cs5013-llm-summarizer/sample_papers";
         System.out.println("=== Starting PDF Extraction Benchmark ===");
 
-        List<File> pdfs = PDFExtractor.getPdfsInDirectory(sampleFolder);
+        List<File> pdfs = DocumentExtractor.getSupportedFilesInDirectory(sampleFolder);
         if (pdfs.isEmpty()) {
             System.err.println("No PDF files found in folder: " + sampleFolder);
             return;
@@ -23,7 +23,7 @@ public class ExtractionBenchmark {
             System.out.println("Generated Hash: " + hash);
 
             // 2. Test Text Extraction with multi-column sorting
-            String text = PDFExtractor.extractFirstPage(pdf.getAbsolutePath());
+            String text = DocumentExtractor.extractText(pdf.getAbsolutePath());
             if ("CORRUPTED_OR_UNREADABLE".equals(text)) {
                 System.err.println("Status: FAILED (Corrupted or empty text)");
             } else {

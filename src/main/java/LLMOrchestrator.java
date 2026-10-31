@@ -74,7 +74,7 @@ public class LLMOrchestrator {
             Ensure all output is properly escaped for valid JSON. Do not output markdown formatting or <think> tags.
             """;
 
-        List<File> pdfs = PDFExtractor.getPdfsInDirectory(targetFolder);
+        List<File> pdfs = DocumentExtractor.getSupportedFilesInDirectory(targetFolder);
         List<FileOrganizer.MoveTask> pendingMoves = new ArrayList<>();
         
         if (pdfs.isEmpty()) {
@@ -94,7 +94,7 @@ public class LLMOrchestrator {
                 continue; 
             }
 
-            String rawPdfText = PDFExtractor.extractFirstPage(pdf.getAbsolutePath());
+            String rawPdfText = DocumentExtractor.extractText(pdf.getAbsolutePath());
             
             String pdfText = rawPdfText.length() > 12000 
                 ? rawPdfText.substring(0, 12000) 

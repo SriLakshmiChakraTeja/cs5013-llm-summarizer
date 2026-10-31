@@ -11,7 +11,7 @@ public class CacheBuster {
         String dbUrl = "jdbc:sqlite:papers.db";
         DatabaseManager dbManager = new DatabaseManager();
 
-        List<File> pdfs = PDFExtractor.getPdfsInDirectory(targetFolder);
+        List<File> pdfs = DocumentExtractor.getSupportedFilesInDirectory(targetFolder);
         
         if (pdfs.isEmpty()) {
             System.out.println("No PDFs found in the root folder.");

@@ -362,7 +362,7 @@ public class SummarizerUI extends Application {
         }
 
         cacheList.getItems().clear();
-        List<File> pdfs = PDFExtractor.getPdfsInDirectory(targetFolder);
+        List<File> pdfs = DocumentExtractor.getSupportedFilesInDirectory(targetFolder);
         
         if (pdfs.isEmpty()) {
             cacheStatusLabel.setText("Status: No PDFs found in the selected folder.");
