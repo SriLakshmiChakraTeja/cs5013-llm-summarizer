@@ -1,5 +1,6 @@
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.embed.swing.SwingFXUtils;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -9,12 +10,20 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Stage;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
 
 import java.io.File;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.util.List;
+
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.rendering.PDFRenderer;
+import java.awt.image.BufferedImage;
+import javafx.scene.image.ImageView;
+import javafx.scene.image.Image;
 
 public class SummarizerUI extends Application {
 
@@ -55,8 +64,12 @@ public class SummarizerUI extends Application {
 
         Tab pipelineTab = new Tab("1. Processing Pipeline", createPipelineTab(primaryStage));
         Tab cacheTab = new Tab("2. Cache Manager", createCacheManagerTab());
-
-        tabPane.getTabs().addAll(pipelineTab, cacheTab);
+        Tab browserTab = new Tab("3. Library Browser", createBrowserTab());
+        
+        // ADD TABS ONLY ONCE:
+        tabPane.getTabs().addAll(pipelineTab, cacheTab, browserTab); 
+        
+        // I REMOVED THE DUPLICATE LINE THAT WAS RIGHT HERE.
 
         Scene scene = new Scene(tabPane, 1000, 750);
         primaryStage.setScene(scene);
@@ -243,7 +256,8 @@ public class SummarizerUI extends Application {
                     spinner.setVisible(false);
                     startButton.setDisable(false);
                     for (FileOrganizer.MoveTask task : tasks) {
-                        if (task.summary.topic != null && !task.summary.topic.equals("Uncategorized") && !task.summary.topic.contains("Extraction failed")) {
+                        // REMOVED the strict filter so all processed files appear in the list
+                        if (task.summary != null) {
                             pendingList.getItems().add(task);
                         }
                     }
@@ -428,5 +442,182 @@ public class SummarizerUI extends Application {
         public String toString() {
             return (isCached ? "[CACHED] " : "[NOT CACHED] ") + file.getName();
         }
+    }
+    private TextArea browseProbArea, browseMethArea, browseTakeArea;
+    private Label browseTopicLabel;
+
+    private VBox createBrowserTab() {
+        SplitPane splitPane = new SplitPane();
+        VBox.setVgrow(splitPane, Priority.ALWAYS);
+
+        // Left Side: File Tree
+        VBox leftPane = new VBox(10);
+        leftPane.setPadding(new Insets(10));
+        Button refreshBtn = new Button("Refresh Library Tree");
+        TreeView<File> fileTree = new TreeView<>();
+        VBox.setVgrow(fileTree, Priority.ALWAYS);
+        
+        fileTree.setCellFactory(tv -> new TreeCell<File>() {
+            @Override
+            protected void updateItem(File file, boolean empty) {
+                super.updateItem(file, empty);
+                if (empty || file == null) {
+                    setText(null);
+                } else {
+                    setText(file.getName());
+                }
+            }
+        });
+
+        refreshBtn.setOnAction(e -> {
+            String targetFolder = dirInput.getText();
+            if (targetFolder != null && !targetFolder.isEmpty()) {
+                File rootDir = new File(targetFolder);
+                TreeItem<File> rootItem = new TreeItem<>(rootDir);
+                rootItem.setExpanded(true);
+                populateTree(rootDir, rootItem);
+                fileTree.setRoot(rootItem);
+            }
+        });
+        
+        leftPane.getChildren().addAll(refreshBtn, fileTree);
+
+        // Right Side: Database Summary Viewer
+        VBox rightPane = new VBox(15);
+        rightPane.setPadding(new Insets(20));
+        rightPane.setStyle("-fx-background-color: #ffffff;");
+        
+        browseTopicLabel = new Label("Topic: None");
+        browseTopicLabel.setFont(Font.font("System", FontWeight.BOLD, 16));
+        browseProbArea = createReadOnlyTextArea();
+        browseMethArea = createReadOnlyTextArea();
+        browseTakeArea = createReadOnlyTextArea();
+
+        // NEW: BibTeX Export UI components
+        Button exportBibtexBtn = new Button("Copy BibTeX Citation");
+        exportBibtexBtn.setStyle("-fx-base: #2196F3; -fx-text-fill: white; -fx-font-weight: bold;");
+        exportBibtexBtn.setDisable(true); // Disabled until a file is clicked
+        Label clipboardStatus = new Label("");
+        clipboardStatus.setStyle("-fx-text-fill: green; -fx-font-style: italic;");
+        HBox exportBox = new HBox(10, exportBibtexBtn, clipboardStatus);
+        exportBox.setAlignment(Pos.CENTER_LEFT);
+
+        rightPane.getChildren().addAll(
+            browseTopicLabel,
+            createBoldLabel("Identified Problem:"), browseProbArea,
+            createBoldLabel("Methodology:"), browseMethArea,
+            createBoldLabel("Key Takeaway:"), browseTakeArea,
+            exportBox
+        );
+
+        // Selection Listener
+       // Selection Listener
+        fileTree.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> {
+            clipboardStatus.setText(""); // Reset status on new selection
+            
+            if (newVal != null && newVal.getValue().isFile()) {
+                File activeFile = newVal.getValue();
+                PaperSummary summary = dbManager.getSummaryByPath(activeFile.getAbsolutePath());
+                
+                if (summary != null) {
+                    browseTopicLabel.setText("Topic: " + summary.topic);
+                    browseProbArea.setText(summary.problem);
+                    browseMethArea.setText(summary.methodology);
+                    browseTakeArea.setText(summary.takeaway);
+                    exportBibtexBtn.setDisable(false);
+                    
+                    // NEW: Attach action to the export button for the current file
+                    exportBibtexBtn.setOnAction(e -> {
+                        String fileName = activeFile.getName().replaceFirst("[.][^.]+$", ""); // Remove extension
+                        String citationKey = fileName.replaceAll("\\s+", "").replaceAll("[^a-zA-Z0-9]", "");
+                        
+                        // Construct the standard BibTeX format
+                        String bibtex = String.format(
+                            "@misc{%s,\n" +
+                            "  title = {%s},\n" +
+                            "  keywords = {%s},\n" +
+                            "  note = {Problem: %s \\n Methodology: %s}\n" +
+                            "}",
+                            citationKey, fileName, summary.topic, summary.problem, summary.methodology
+                        );
+                        
+                        Clipboard clipboard = Clipboard.getSystemClipboard();
+                        ClipboardContent content = new ClipboardContent();
+                        content.putString(bibtex);
+                        clipboard.setContent(content);
+                        
+                        clipboardStatus.setText("Copied to clipboard!");
+                    });
+                    
+                } else {
+                    browseTopicLabel.setText("Status: Not processed or cached yet.");
+                    browseProbArea.clear(); browseMethArea.clear(); browseTakeArea.clear();
+                    exportBibtexBtn.setDisable(true);
+                }
+            } else {
+                exportBibtexBtn.setDisable(true);
+            }
+        });
+
+        fileTree.setOnMouseClicked(event -> {
+            if (event.getClickCount() == 2) {
+                TreeItem<File> selectedItem = fileTree.getSelectionModel().getSelectedItem();
+                if (selectedItem != null && selectedItem.getValue().isFile()) {
+                    String fileName = selectedItem.getValue().getName().toLowerCase();
+                    if (fileName.endsWith(".pdf")) {
+                        openPdfViewer(selectedItem.getValue());
+                    } else {
+                        System.out.println("Viewer currently only supports .pdf files.");
+                    }
+                }
+            }
+        });
+
+        splitPane.getItems().addAll(leftPane, rightPane);
+        splitPane.setDividerPositions(0.30);
+
+        VBox layout = new VBox(splitPane);
+        return layout;
+    }
+
+    private void populateTree(File dir, TreeItem<File> parent) {
+        File[] files = dir.listFiles();
+        if (files != null) {
+            for (File file : files) {
+                TreeItem<File> treeItem = new TreeItem<>(file);
+                parent.getChildren().add(treeItem);
+                if (file.isDirectory()) {
+                    populateTree(file, treeItem);
+                }
+            }
+        }
+    }
+    private void openPdfViewer(File pdfFile) {
+        Stage viewerStage = new Stage();
+        viewerStage.setTitle("Document Viewer: " + pdfFile.getName());
+
+        ImageView imageView = new ImageView();
+        imageView.setPreserveRatio(true);
+        imageView.setFitWidth(800);
+
+        ScrollPane scrollPane = new ScrollPane(imageView);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setStyle("-fx-background-color: #525659;"); 
+
+        try (PDDocument document = PDDocument.load(pdfFile)) {
+            PDFRenderer renderer = new PDFRenderer(document);
+            // Render the first page (index 0) at 150 DPI for clarity
+            BufferedImage bufferedImage = renderer.renderImageWithDPI(0, 150);
+            Image fxImage = SwingFXUtils.toFXImage(bufferedImage, null);
+            imageView.setImage(fxImage);
+        } catch (Exception e) {
+            System.err.println("Failed to render PDF: " + e.getMessage());
+            Label errorLabel = new Label("Could not load PDF: " + pdfFile.getName());
+            scrollPane.setContent(errorLabel);
+        }
+
+        Scene scene = new Scene(scrollPane, 850, 900);
+        viewerStage.setScene(scene);
+        viewerStage.show();
     }
 }

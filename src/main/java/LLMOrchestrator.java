@@ -23,7 +23,7 @@ public class LLMOrchestrator {
                 .apiKey("not-needed")
                 .modelName(MODEL_NAME)
                 .temperature(0.0)
-                .timeout(Duration.ofSeconds(5)) 
+                .timeout(Duration.ofMinutes(2)) 
                 .build();
 
             String response = testModel.generate("Reply with exactly: OK");
@@ -53,25 +53,31 @@ public class LLMOrchestrator {
         ObjectMapper mapper = new ObjectMapper();
 
         String systemPrompt = """
-            You are an expert academic research summarizer. Read the provided text and return ONLY a valid JSON object.
-            
-            Rules for Summarization:
-            1. 'problem': Write a paragraph (1 sentence) explaining the background, the context of the field, and the exact core issue or gap the paper addresses.
-            2. 'methodology': Write a detailed paragraph (4-6 sentences) thoroughly explaining the authors' proposed solution, system architecture, mathematical models, or experimental setup.
-            3. 'takeaway': Write a paragraph (1 sentence) expanding on the main results, specific performance improvements, conclusions, and future implications.
-            4. 'topic': You MUST strictly evaluate the 'Available topics' provided in the user message. Prioritize matching the paper to an existing topic at all costs. ONLY invent a new 1-3 word topic if the paper's subject matter is completely alien to EVERY available option.
-            
-            Rules for Corrupted Text:
-            If the provided text is a string of random characters, mathematical symbols, or completely unreadable due to PDF extraction errors, DO NOT invent a summary. 
-            Instead, you MUST output exactly this:
-            {
-              "problem": "Extraction failed due to corrupted text.",
-              "methodology": "N/A",
-              "takeaway": "N/A",
-              "topic": "Uncategorized"
-            }
-            
-            Ensure all output is properly escaped for valid JSON. Do not output markdown formatting or <think> tags.
+            You are an expert document summarizer. Respond with ONE valid JSON object and nothing else.
+            Use exactly these keys: "problem", "methodology", "takeaway", "topic".
+
+            Rules:
+            1. 'problem': Exactly 1 sentence (20-40 words). For a research paper, state the research area and the gap it addresses. For any other document (course material, report, schedule, notes), state its main purpose or context. Do not begin with "This document" or "The authors".
+            2. 'methodology': One paragraph of 4-6 sentences. For a research paper, explain how the authors solve the problem. For any other document, summarize its tasks, instructions, or contents. Use the document's own terms.
+            3. 'takeaway': Exactly 1 sentence (20-40 words). For a research paper, state the main result and conclusion. For any other document, state the final outcome, deliverable, or main point.
+            4. 'topic': A short descriptive name (2-4 words, Title Case) that says what the document is specifically about, so a person reading the folder name knows what is inside.
+                a) Name the specific subject matter: the technique, system, or problem the document deals with. Be more specific than a whole field. Too broad: "Software Engineering", "Machine Learning", "Computer Science". Good: the specific area within it.
+                b) Do not make it so narrow that it only fits this one file. It should still suit a few related documents. Do not use author names, file names, version numbers, or the exact document title.
+                c) Never use document-type words such as "Project", "Hands-on", "Handson", "Reflection", "Assignment", "Report", "Notes", "Document", "Module", "Course", "Demo", "Chat", "Schedule", "Plan", "Design Doc", or "General".
+                d) Existing library topics: %s
+                    Reuse one EXACTLY as written only if it describes the same specific subject as this document. A merely related broad field is not a match. If an existing topic is a document-type word or is too broad to describe this document, ignore it and write a new descriptive name.
+                e) Use only letters, spaces, and hyphens.
+                f) Format examples only. These are from unrelated subjects, so NEVER copy them: "Quantum Error Correction", "Kubernetes Autoscaling Strategies", "Graph Neural Network Pretraining", "Database Index Tuning", "Wireless Sensor Energy Saving".
+               g) Use only letters, spaces, and hyphens.
+
+            General rules:
+            - Base every statement only on the provided text. Never invent results or numbers.
+            - Plain sentences only: no bullets, markdown, or line breaks inside values.
+            - Never output "N/A" for a document that contains readable sentences, even if it is not a research paper.
+            - Output only the JSON object. No explanations, no reasoning text, no markdown fences.
+
+            Only if the text is entirely random characters or symbols with no readable sentences, output exactly:
+            {"problem": "Extraction failed due to corrupted text.", "methodology": "N/A", "takeaway": "N/A", "topic": "Uncategorized"}
             """;
 
         List<File> pdfs = DocumentExtractor.getSupportedFilesInDirectory(targetFolder);
@@ -114,16 +120,22 @@ public class LLMOrchestrator {
                 ).content().text();
 
                 String cleanJson = rawResponse;
-                int jsonStart = cleanJson.indexOf('{');
-                int jsonEnd = cleanJson.lastIndexOf('}');
+        
+                // STRICT EXTRACTION: Ignore any LLM preamble, cut-off thoughts, and isolate the JSON block
+                int startIndex = cleanJson.indexOf('{');
+                int endIndex = cleanJson.lastIndexOf('}');
                 
-                if (jsonStart != -1 && jsonEnd != -1 && jsonStart < jsonEnd) {
-                    cleanJson = cleanJson.substring(jsonStart, jsonEnd + 1);
+                if (startIndex != -1 && endIndex != -1 && startIndex <= endIndex) {
+                    cleanJson = cleanJson.substring(startIndex, endIndex + 1);
                 } else {
-                    cleanJson = "{\"problem\": \"Extraction failed: LLM output format error.\", \"methodology\": \"N/A\", \"takeaway\": \"N/A\", \"topic\": \"Uncategorized\"}";
+                    // FALLBACK: If the model timed out before generating the '{', safely trigger the UI escape hatch
+                    System.err.println("CRITICAL: LLM failed to generate a valid JSON structure.");
+                    cleanJson = "{\n  \"problem\": \"Extraction failed: LLM output format error.\",\n  \"methodology\": \"N/A\",\n  \"takeaway\": \"N/A\",\n  \"topic\": \"Uncategorized\"\n}";
                 }
+                // System.out.println("RAW LLM OUTPUT:\n" + rawResponse);
                 
-                System.out.println("Clean JSON generated successfully.");
+                System.out.println("\nClean JSON ready for Jackson/Gson Parsing:");
+                System.out.println(cleanJson);
 
                 PaperSummary summary = mapper.readValue(cleanJson, PaperSummary.class);
                 pendingMoves.add(new FileOrganizer.MoveTask(pdf, summary, fileHash));

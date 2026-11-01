@@ -79,7 +79,27 @@ public class DatabaseManager {
             return null;
         }
     }
-
+    public PaperSummary getSummaryByPath(String filePath) {
+        String query = "SELECT s.problem, s.methodology, s.takeaway, s.topic " +
+                       "FROM summaries s JOIN papers p ON s.paper_id = p.id " +
+                       "WHERE p.file_path = ?";
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             PreparedStatement pstmt = conn.prepareStatement(query)) {
+            pstmt.setString(1, filePath);
+            ResultSet rs = pstmt.executeQuery();
+            if (rs.next()) {
+                PaperSummary summary = new PaperSummary();
+                summary.problem = rs.getString("problem");
+                summary.methodology = rs.getString("methodology");
+                summary.takeaway = rs.getString("takeaway");
+                summary.topic = rs.getString("topic");
+                return summary;
+            }
+        } catch (SQLException e) {
+            System.err.println("Error fetching summary: " + e.getMessage());
+        }
+        return null;
+    }
     // Exact method to check processing_cache table
     public boolean isCached(String fileHash) {
         String query = "SELECT file_hash FROM processing_cache WHERE file_hash = ?";
