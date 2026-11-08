@@ -1,0 +1,5 @@
+.git
+target
+papers.db
+sample_papers
+*.pdf

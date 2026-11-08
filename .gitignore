@@ -11,3 +11,4 @@ pom.xml.next
 *.iml
 *.iws
 *.class
+*.gguf
