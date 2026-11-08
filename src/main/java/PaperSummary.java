@@ -6,4 +6,5 @@ public class PaperSummary {
     public String methodology;
     public String takeaway;
     public String topic;
+    public String notes = "";
 }

@@ -29,6 +29,7 @@ public class DatabaseManager {
                 methodology TEXT,
                 takeaway TEXT,
                 topic TEXT,
+                notes TEXT,
                 FOREIGN KEY (paper_id) REFERENCES papers (id)
             );
             """;
@@ -40,7 +41,6 @@ public class DatabaseManager {
             );
             """;
 
-        // Required 4th table as per design doc
         String sqlCreateCache = """
             CREATE TABLE IF NOT EXISTS processing_cache (
                 file_hash TEXT PRIMARY KEY,
@@ -79,8 +79,9 @@ public class DatabaseManager {
             return null;
         }
     }
+
     public PaperSummary getSummaryByPath(String filePath) {
-        String query = "SELECT s.problem, s.methodology, s.takeaway, s.topic " +
+        String query = "SELECT s.problem, s.methodology, s.takeaway, s.topic, s.notes " +
                        "FROM summaries s JOIN papers p ON s.paper_id = p.id " +
                        "WHERE p.file_path = ?";
         try (Connection conn = DriverManager.getConnection(DB_URL);
@@ -93,6 +94,7 @@ public class DatabaseManager {
                 summary.methodology = rs.getString("methodology");
                 summary.takeaway = rs.getString("takeaway");
                 summary.topic = rs.getString("topic");
+                summary.notes = rs.getString("notes") == null ? "" : rs.getString("notes");
                 return summary;
             }
         } catch (SQLException e) {
@@ -100,7 +102,7 @@ public class DatabaseManager {
         }
         return null;
     }
-    // Exact method to check processing_cache table
+
     public boolean isCached(String fileHash) {
         String query = "SELECT file_hash FROM processing_cache WHERE file_hash = ?";
         try (Connection conn = DriverManager.getConnection(DB_URL);
@@ -116,7 +118,7 @@ public class DatabaseManager {
 
     public void savePaperSummary(String filePath, String fileHash, PaperSummary summary) {
         String insertPaper = "INSERT INTO papers(file_path, file_hash) VALUES(?, ?)";
-        String insertSummary = "INSERT INTO summaries(paper_id, problem, methodology, takeaway, topic) VALUES(?, ?, ?, ?, ?)";
+        String insertSummary = "INSERT INTO summaries(paper_id, problem, methodology, takeaway, topic, notes) VALUES(?, ?, ?, ?, ?, ?)";
         String insertTopic = "INSERT OR IGNORE INTO topics(name) VALUES(?)";
         String insertCache = "INSERT OR IGNORE INTO processing_cache(file_hash, paper_id) VALUES(?, ?)";
 
@@ -140,12 +142,17 @@ public class DatabaseManager {
                 pstmt.setString(3, summary.methodology);
                 pstmt.setString(4, summary.takeaway);
                 pstmt.setString(5, summary.topic);
+                pstmt.setString(6, summary.notes);
                 pstmt.executeUpdate();
             }
 
+            // Split comma-separated topics and insert them individually for UI dropdowns
+            String[] splitTopics = summary.topic.split(",");
             try (PreparedStatement pstmt = conn.prepareStatement(insertTopic)) {
-                pstmt.setString(1, summary.topic);
-                pstmt.executeUpdate();
+                for (String t : splitTopics) {
+                    pstmt.setString(1, t.trim());
+                    pstmt.executeUpdate();
+                }
             }
 
             try (PreparedStatement pstmt = conn.prepareStatement(insertCache)) {
@@ -155,9 +162,40 @@ public class DatabaseManager {
             }
 
             conn.commit();
-            System.out.println("Saved summary to SQLite and updated processing_cache: " + filePath);
+            System.out.println("Saved metadata to SQLite: " + filePath);
         } catch (SQLException e) {
-            System.err.println("Failed to persist summary: " + e.getMessage());
+            System.err.println("Failed to persist metadata: " + e.getMessage());
+        }
+    }
+    
+    // NEW METHOD: Enables seamless reassignment and note updates from the UI
+    public void updatePaperMetadata(String filePath, String newTopics, String newNotes) {
+        String query = "UPDATE summaries SET topic = ?, notes = ? " +
+                       "WHERE paper_id = (SELECT id FROM papers WHERE file_path = ?)";
+        String insertTopic = "INSERT OR IGNORE INTO topics(name) VALUES(?)";
+
+        try (Connection conn = DriverManager.getConnection(DB_URL)) {
+            conn.setAutoCommit(false);
+            
+            try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                pstmt.setString(1, newTopics);
+                pstmt.setString(2, newNotes);
+                pstmt.setString(3, filePath);
+                pstmt.executeUpdate();
+            }
+            
+            // Ensure any newly added topics are registered in the global vocabulary
+            String[] splitTopics = newTopics.split(",");
+            try (PreparedStatement pstmt = conn.prepareStatement(insertTopic)) {
+                for (String t : splitTopics) {
+                    pstmt.setString(1, t.trim());
+                    pstmt.executeUpdate();
+                }
+            }
+            
+            conn.commit();
+        } catch (SQLException e) {
+            System.err.println("Failed to update metadata: " + e.getMessage());
         }
     }
 

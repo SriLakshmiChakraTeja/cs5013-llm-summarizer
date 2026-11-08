@@ -1,8 +1,4 @@
 import java.io.File;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.List;
 
 public class FileOrganizer {
@@ -19,28 +15,22 @@ public class FileOrganizer {
         }
     }
 
-    public static void executeMove(MoveTask task, String finalTopic, String libraryRoot, DatabaseManager dbManager, List<String> existingTopics) {
-        File targetFolder = new File(libraryRoot, finalTopic);
-        if (!targetFolder.exists()) {
-            targetFolder.mkdirs(); 
-        }
-
-        Path sourcePath = Paths.get(task.pdf.getAbsolutePath());
-        Path targetPath = Paths.get(targetFolder.getAbsolutePath(), sourcePath.getFileName().toString());
-
+    public static void executeMove(MoveTask task, String finalTopics, String libraryRoot, DatabaseManager dbManager, List<String> existingTopics) {
         try {
-            task.summary.topic = finalTopic;
-            Files.move(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+            task.summary.topic = finalTopics;
             
-            // Fixed: Save the new absolute path to the database, not the old root path
-            dbManager.savePaperSummary(targetPath.toAbsolutePath().toString(), task.fileHash, task.summary);
+            dbManager.savePaperSummary(task.pdf.getAbsolutePath(), task.fileHash, task.summary);
             
-            if (!existingTopics.contains(finalTopic)) {
-                existingTopics.add(finalTopic);
+            String[] splitTopics = finalTopics.split(",");
+            for (String t : splitTopics) {
+                String cleanTopic = t.trim();
+                if (!existingTopics.contains(cleanTopic)) {
+                    existingTopics.add(cleanTopic);
+                }
             }
-            System.out.println("-> Success: Moved to '" + targetFolder.getName() + "' and cached successfully.");
+            System.out.println("-> Success: Cached logically with topics: '" + finalTopics + "'. File remained in root.");
         } catch (Exception e) {
-            System.err.println("-> Error moving file: " + e.getMessage());
+            System.err.println("-> Error caching file metadata: " + e.getMessage());
         }
     }
 }
